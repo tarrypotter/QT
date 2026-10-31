@@ -75,6 +75,12 @@ body.dark input::placeholder,body.dark textarea::placeholder{color:#9daea2}
 
 /* v2.1 share report */
 header{gap:8px}header>div:first-child{flex:1;min-width:0}.share-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.share-options label{display:flex;align-items:center;gap:8px;padding:12px;background:var(--soft);border-radius:13px;font-weight:650;font-size:13px;min-height:48px}.share-options input{width:18px;height:18px;accent-color:var(--brand)}.share-sheet{color:#27382f;background:#fffdf8;border:1px solid #e5e9e0;border-radius:19px;padding:25px 21px;line-height:1.7;box-shadow:0 8px 27px #1b442512}.share-sheet-header{border-bottom:2px solid #275e47;padding-bottom:17px;margin-bottom:18px}.share-sheet-title{font-size:23px;font-weight:850;letter-spacing:-.05em;color:#244e39}.share-sheet-section{border-bottom:1px solid #e8ece6;padding:13px 0;break-inside:avoid}.share-sheet-section h3{font-size:15px;color:#2c634c;margin:0 0 8px}.share-sheet-section pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;margin:3px 0 9px;color:#38483c;line-height:1.76}.share-sheet-section p{font-size:13px;margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}.share-sheet-meta{color:#687969;font-size:12px}.share-sheet-footer{font-size:11px;color:#738274;margin-top:16px}.share-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.share-actions button{width:100%}.share-empty{color:#78837c;font-size:13px}.private-note{font-size:12px;color:var(--muted)}@media print{body{background:white!important;color:#222!important}.app{max-width:none!important}header,.nav,.no-print,.toast,main>.section{display:none!important}main{padding:0!important;margin:0!important;animation:none!important}.share-sheet{border:none;box-shadow:none;border-radius:0;padding:0;max-width:none}.share-sheet-section{break-inside:avoid}@page{size:A4;margin:17mm}}
+
+/* v2.2 - generous writing surfaces and content-aware growth */
+#content{min-height:300px}
+#presBody,#thoughtBody{min-height:360px}
+#content,#presBody,#thoughtBody{width:100%;resize:vertical;overflow-y:hidden;line-height:1.85;padding:17px 16px;font-size:16px}
+@media(max-width:420px){#content{min-height:270px}#presBody,#thoughtBody{min-height:320px}}
 </style></head><body><div class="app"><header><div><div class="eyebrow">QT & LIFE</div><div class="logo">말씀을 삶으로 실천 <span style="color:#b49b6a">✝</span></div></div><button class="iconbtn" onclick="openShareReport()" aria-label="하루 공유 리포트" title="하루 공유 리포트">↗</button><button class="iconbtn" onclick="navigate('settings')" aria-label="설정">⚙️</button></header><main id="view"></main><nav class="nav" id="nav" aria-label="하단 메뉴"></nav></div><div id="toast" class="toast hidden" role="status" aria-live="polite"></div><input type="file" id="importFile" accept="application/json,.json" class="hidden"><script>
 'use strict';
 const DB_NAME='malssumdaero_qt_life',VERSION=4,STORES=['qtQuestions','thoughtNotes','presentations','settings','qtNotes','practiceGoals','practiceLogs','reflections','questions','testAttempts','challenges','prayers'];let db,route='home',state={date:today(),qt:null,goal:null,quiz:null,quizIndex:0,quizAnswers:[],testConfig:{scope:'today',type:'mixed',count:5},growthMonth:today().slice(0,7)};
@@ -319,5 +325,19 @@ function shareLinesFromSections(){let secs=buildReportSections(shareDocument);le
 async function makeSharePNG(){if(!shareDocument)throw Error('공유할 날짜를 먼저 선택하세요.');let lines=shareLinesFromSections(),w=950,margin=64,maxWidth=w-margin*2;let canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');if(!ctx)throw Error('캔버스가 지원되지 않아요');const fontFor=t=>t==='title'?'bold 38px sans-serif':t==='heading'?'bold 27px sans-serif':t==='item'?'bold 21px sans-serif':t==='date'?'18px sans-serif':'19px sans-serif';let rows=[];for(const l of lines){ctx.font=fontFor(l.type);let pieces=String(l.text||'').split('\n');for(let piece of pieces){let line='';for(const char of Array.from(piece)){if(ctx.measureText(line+char).width>maxWidth&&line){rows.push({type:l.type,text:line});line=''}line+=char}rows.push({type:l.type,text:line})}rows.push({type:'gap',text:''})}let h=110+rows.reduce((n,r)=>n+(r.type==='title'?66:r.type==='heading'?51:r.type==='gap'?13:33),0)+60;if(h>15000)throw Error('내용이 너무 길어요. 포함 항목을 줄이거나 PDF로 저장해 주세요.');canvas.width=w;canvas.height=h;ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,w,h);ctx.fillStyle='#245c43';ctx.fillRect(0,0,w,12);let y=74;for(const r of rows){if(r.type==='gap'){y+=13;continue}ctx.font=fontFor(r.type);ctx.fillStyle=r.type==='title'||r.type==='heading'?'#245c43':r.type==='date'?'#78857c':'#26372e';ctx.textBaseline='top';ctx.fillText(r.text,margin,y);y+=r.type==='title'?66:r.type==='heading'?51:33}return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('이미지 생성에 실패했어요')),'image/png'))}
 async function downloadSharePNG(){try{let b=await makeSharePNG();downloadBlob(b,shareFilename('png'));toast('PNG 이미지 저장을 요청했어요')}catch(e){alert(e.message)}}
 async function shareDailyFile(){try{let blob=await makeSharePNG(),file=new File([blob],shareFilename('png'),{type:'image/png'});if(navigator.canShare?.({files:[file]})&&navigator.share){await navigator.share({files:[file],title:'나의 말씀 기록'});}else{downloadBlob(blob,file.name);toast('공유 메뉴 미지원: PNG 저장을 요청했어요')}}catch(e){if(e.name!=='AbortError')alert('공유 실패: '+e.message)}}
+
+
+// v2.2: adjust long-form writing areas without interrupting existing autosave.
+function expandWritingArea(el){
+ if(!el||!['content','presBody','thoughtBody'].includes(el.id))return;
+ const min=el.id==='content'? (matchMedia('(max-width:420px)').matches?270:300) : (matchMedia('(max-width:420px)').matches?320:360);
+ el.style.height='auto';
+ el.style.height=Math.max(min,el.scrollHeight+4)+'px';
+}
+function expandVisibleWritingAreas(){for(const id of ['content','presBody','thoughtBody'])expandWritingArea(document.getElementById(id))}
+document.addEventListener('input',event=>{if(event.target instanceof HTMLTextAreaElement)expandWritingArea(event.target)},true);
+const writingObserver=new MutationObserver(()=>{requestAnimationFrame(expandVisibleWritingAreas)});
+writingObserver.observe(document.getElementById('view'),{childList:true,subtree:false});
+document.addEventListener('DOMContentLoaded',expandVisibleWritingAreas);
 
 </script></body></html>
