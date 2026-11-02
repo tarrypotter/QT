@@ -572,10 +572,88 @@ function shareHtmlDocument(){const el=document.getElementById('reportPaper');ret
 </style></head><body>${el.innerHTML}</body></html>`}
 function downloadShareHTML(){downloadBlob(new Blob([shareHtmlDocument()],{type:'text/html;charset=utf-8'}),shareFilename('html'));toast('HTML 파일 저장을 요청했어요')}
 function shareLinesFromSections(){let secs=buildReportSections(shareDocument);let lines=[{text:'말씀을 삶으로 실천',type:'title'},{text:formatDate(state.shareDate||today())+' · QT & LIFE',type:'date'}];for(const s of secs){lines.push({text:s.title,type:'heading'});for(const e of s.entries){lines.push({text:e.heading,type:'item'});for(const l of e.lines)lines.push({text:(l.label?l.label+' · ':'')+l.text,type:'body'})}}return lines}
-async function makeSharePNG(){if(!shareDocument)throw Error('공유할 날짜를 먼저 선택하세요.');let lines=shareLinesFromSections(),w=950,margin=64,maxWidth=w-margin*2;let canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');if(!ctx)throw Error('캔버스가 지원되지 않아요');const fontFor=t=>t==='title'?'bold 38px sans-serif':t==='heading'?'bold 27px sans-serif':t==='item'?'bold 21px sans-serif':t==='date'?'18px sans-serif':'19px sans-serif';let rows=[];for(const l of lines){ctx.font=fontFor(l.type);let pieces=String(l.text||'').split('\n');for(let piece of pieces){let line='';for(const char of Array.from(piece)){if(ctx.measureText(line+char).width>maxWidth&&line){rows.push({type:l.type,text:line});line=''}line+=char}rows.push({type:l.type,text:line})}rows.push({type:'gap',text:''})}let h=110+rows.reduce((n,r)=>n+(r.type==='title'?66:r.type==='heading'?51:r.type==='gap'?13:33),0)+60;if(h>15000)throw Error('내용이 너무 길어요. 포함 항목을 줄이거나 PDF로 저장해 주세요.');canvas.width=w;canvas.height=h;ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,w,h);ctx.fillStyle='#245c43';ctx.fillRect(0,0,w,12);let y=74;for(const r of rows){if(r.type==='gap'){y+=13;continue}ctx.font=fontFor(r.type);ctx.fillStyle=r.type==='title'||r.type==='heading'?'#245c43':r.type==='date'?'#78857c':'#26372e';ctx.textBaseline='top';ctx.fillText(r.text,margin,y);y+=r.type==='title'?66:r.type==='heading'?51:33}return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('이미지 생성에 실패했어요')),'image/png'))}
-async function downloadSharePNG(){try{let b=await makeSharePNG();downloadBlob(b,shareFilename('png'));toast('PNG 이미지 저장을 요청했어요')}catch(e){alert(e.message)}}
-async function shareDailyFile(){try{let blob=await makeSharePNG(),file=new File([blob],shareFilename('png'),{type:'image/png'});if(navigator.canShare?.({files:[file]})&&navigator.share){await navigator.share({files:[file],title:'나의 말씀 기록'});}else{downloadBlob(blob,file.name);toast('공유 메뉴 미지원: PNG 저장을 요청했어요')}}catch(e){if(e.name!=='AbortError')alert('공유 실패: '+e.message)}}
-
+// v4.6: readable, paginated PNG export with one share invocation per tap.
+let sharingPagesBusy=false;
+function shareRowsForPages(ctx,w,margin){
+ const lines=shareLinesFromSections(),maxWidth=w-margin*2;
+ const fonts={title:'bold 44px sans-serif',heading:'bold 33px sans-serif',item:'bold 28px sans-serif',date:'23px sans-serif',body:'25px sans-serif'};
+ const heights={title:79,heading:68,item:50,date:49,body:44,gap:22};
+ const rows=[];
+ for(const entry of lines){
+   const type=entry.type in fonts?entry.type:'body';ctx.font=fonts[type];
+   for(const piece of String(entry.text||'').split('\n')){
+     let line='';
+     for(const char of Array.from(piece)){
+       if(line && ctx.measureText(line+char).width>maxWidth){rows.push({type,text:line,height:heights[type]});line='';}
+       line+=char;
+     }
+     rows.push({type,text:line,height:heights[type]});
+   }
+   rows.push({type:'gap',text:'',height:heights.gap});
+ }
+ return {rows,fonts};
+}
+async function makeSharePNGs(){
+ if(!shareDocument)throw Error('공유할 날짜를 먼저 선택하세요.');
+ const width=1080,height=1520,margin=82,contentTop=158,contentBottom=height-120;
+ const scratch=document.createElement('canvas'),measure=scratch.getContext('2d');
+ if(!measure)throw Error('이 브라우저에서는 이미지 생성 기능을 사용할 수 없어요.');
+ const {rows,fonts}=shareRowsForPages(measure,width,margin);
+ const pages=[];let page=[],y=0;
+ for(const row of rows){
+   if(y+row.height>contentBottom-contentTop && page.length){pages.push(page);page=[];y=0;}
+   page.push(row);y+=row.height;
+ }
+ if(page.length)pages.push(page);
+ if(pages.length>60)throw Error('공유할 내용이 너무 길어요. 날짜나 항목을 나누어 공유해 주세요.');
+ const blobs=[];
+ for(let i=0;i<pages.length;i++){
+   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+   const ctx=canvas.getContext('2d');if(!ctx)throw Error('이미지 캔버스를 열 수 없어요.');
+   ctx.fillStyle='#fffdf8';ctx.fillRect(0,0,width,height);
+   ctx.fillStyle='#245c43';ctx.fillRect(0,0,width,12);
+   ctx.font='bold 25px sans-serif';ctx.fillStyle='#245c43';ctx.fillText('QT & LIFE  |  나의 말씀 기록',margin,90);
+   ctx.font='21px sans-serif';ctx.fillStyle='#738276';ctx.fillText(String(state.shareDate||today()),margin,125);
+   let top=contentTop;
+   for(const r of pages[i]){
+     if(r.type==='gap'){top+=r.height;continue;}
+     ctx.font=fonts[r.type]||fonts.body;
+     ctx.fillStyle=r.type==='title'||r.type==='heading'?'#245c43':r.type==='date'?'#7d877e':'#26372e';
+     ctx.textBaseline='top';ctx.fillText(r.text,margin,top);top+=r.height;
+   }
+   ctx.strokeStyle='#e2e8e0';ctx.beginPath();ctx.moveTo(margin,height-85);ctx.lineTo(width-margin,height-85);ctx.stroke();
+   ctx.font='22px sans-serif';ctx.fillStyle='#66786a';ctx.textAlign='right';
+   ctx.fillText(`${i+1} / ${pages.length}`,width-margin,height-64);ctx.textAlign='left';
+   const blob=await new Promise((resolve,reject)=>canvas.toBlob(x=>x?resolve(x):reject(Error('PNG 이미지 생성 실패')),'image/png'));
+   blobs.push(blob);
+ }
+ return blobs;
+}
+async function makeSharePNG(){const pages=await makeSharePNGs();return pages[0];}
+function pagedShareFile(blob,index,total){
+ const stem=shareFilename('png').replace(/\.png$/i,'');
+ return new File([blob],`${stem}_${String(index+1).padStart(2,'0')}-${String(total).padStart(2,'0')}.png`,{type:'image/png'});
+}
+async function downloadSharePNG(){
+ if(sharingPagesBusy)return;
+ sharingPagesBusy=true;
+ try{const blobs=await makeSharePNGs();blobs.forEach((b,i)=>downloadBlob(b,pagedShareFile(b,i,blobs.length).name));toast(`PNG ${blobs.length}장 저장을 요청했어요.`)}
+ catch(e){alert(e.message)}finally{sharingPagesBusy=false}
+}
+async function shareDailyFile(){
+ if(sharingPagesBusy)return;
+ sharingPagesBusy=true;
+ try{
+   const blobs=await makeSharePNGs();const files=blobs.map((b,i)=>pagedShareFile(b,i,blobs.length));
+   if(navigator.share && navigator.canShare?.({files})){
+     await navigator.share({files,title:'나의 말씀 기록'});
+   }else{
+     files.forEach((file,i)=>downloadBlob(blobs[i],file.name));
+     toast(`공유 기능이 지원되지 않아 PNG ${files.length}장 저장을 요청했어요.`);
+   }
+ }catch(e){if(e.name!=='AbortError')alert('공유 실패: '+e.message)}
+ finally{sharingPagesBusy=false}
+}
 
 // v2.2: adjust long-form writing areas without interrupting existing autosave.
 function expandWritingArea(el){
